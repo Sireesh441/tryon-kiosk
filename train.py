@@ -5,16 +5,21 @@ Wires together CocoPersonDataset + PersonDetector + detector_loss into
 an actual training loop.
 
 This is meant to be run in two modes:
-  1. CPU smoke run (default): trains on a SMALL subset for a few epochs,
-     just to confirm the loss goes down and nothing is broken. Slow but
-     cheap -- do this before spending RunPod GPU credits.
-  2. Full run (later): once the smoke run confirms things work, we'll
-     adjust NUM_EPOCHS / SUBSET_SIZE and move this to the GPU.
+  1. CPU smoke run: trains on a SMALL subset (SUBSET_SIZE) for a few
+     epochs, just to confirm the loss goes down and nothing is broken.
+     Slow but cheap -- do this before spending RunPod GPU credits.
+  2. Full run (current default): SUBSET_SIZE=None trains on the entire
+     person-filtered dataset (2,693 val2017 images) for NUM_EPOCHS=50 on
+     the GPU. 50 is a starting point for a small (~450K param) detector
+     on a few thousand images -- CenterNet-style anchor-free detectors
+     this size typically need tens of epochs to show real convergence;
+     revisit upward if loss is still dropping steadily at epoch 50.
 
 Usage:
     py train.py
 """
 
+import os
 import time
 
 import torch
@@ -24,10 +29,11 @@ from coco_person_dataset import CocoPersonDataset
 from detector_model import PersonDetector, detector_loss
 
 # --- Config ---------------------------------------------------------------
-SUBSET_SIZE = 64        # small subset for a fast CPU smoke run
+SUBSET_SIZE = None      # None = full dataset; set to an int for a fast CPU smoke run
 BATCH_SIZE = 4
-NUM_EPOCHS = 5
+NUM_EPOCHS = 50
 LEARNING_RATE = 1e-3
+CHECKPOINT_EVERY = 10   # also save a checkpoint every N epochs, not just at the end
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -36,14 +42,24 @@ def main():
 
     print("Loading dataset...")
     full_dataset = CocoPersonDataset()
-    subset_indices = list(range(min(SUBSET_SIZE, len(full_dataset))))
-    dataset = Subset(full_dataset, subset_indices)
-    print(f"Training on a subset of {len(dataset)} images (out of {len(full_dataset)} total)")
+    if SUBSET_SIZE is None:
+        dataset = full_dataset
+    else:
+        subset_indices = list(range(min(SUBSET_SIZE, len(full_dataset))))
+        dataset = Subset(full_dataset, subset_indices)
+    print(f"Training on {len(dataset)} images (out of {len(full_dataset)} total)")
 
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
 
     model = PersonDetector().to(DEVICE)
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+
+    os.makedirs("checkpoints", exist_ok=True)
+
+    def save_checkpoint(epoch):
+        path = f"checkpoints/model_epoch{epoch}.pt"
+        torch.save({"epoch": epoch, "model_state_dict": model.state_dict()}, path)
+        print(f"Saved checkpoint to {path}")
 
     print(f"\nStarting training for {NUM_EPOCHS} epochs...\n")
 
@@ -89,17 +105,14 @@ def main():
             f"time: {epoch_time:.1f}s"
         )
 
-    print("\nTraining smoke run complete.")
+        if epoch % CHECKPOINT_EVERY == 0:
+            save_checkpoint(epoch)
+
+    print("\nTraining run complete.")
     print("Check above: total_loss should trend downward across epochs.")
     print("If it does, the pipeline (data -> model -> loss -> optimizer) is verified working.")
 
-    import os
-    os.makedirs("checkpoints", exist_ok=True)
-    torch.save({
-        "epoch": NUM_EPOCHS,
-        "model_state_dict": model.state_dict(),
-    }, f"checkpoints/model_epoch{NUM_EPOCHS}.pt")
-    print(f"Saved checkpoint to checkpoints/model_epoch{NUM_EPOCHS}.pt")
+    save_checkpoint(NUM_EPOCHS)
 
 
 if __name__ == "__main__":
