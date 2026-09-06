@@ -25,6 +25,43 @@ STRIDE = 8
 GRID_SIZE = INPUT_SIZE // STRIDE
 
 
+def compute_iou(box_a, box_b):
+    """IoU between two boxes in (x1, y1, x2, y2) format."""
+    x1 = max(box_a[0], box_b[0])
+    y1 = max(box_a[1], box_b[1])
+    x2 = min(box_a[2], box_b[2])
+    y2 = min(box_a[3], box_b[3])
+
+    inter_w = max(0, x2 - x1)
+    inter_h = max(0, y2 - y1)
+    inter_area = inter_w * inter_h
+
+    area_a = (box_a[2] - box_a[0]) * (box_a[3] - box_a[1])
+    area_b = (box_b[2] - box_b[0]) * (box_b[3] - box_b[1])
+    union_area = area_a + area_b - inter_area
+
+    return inter_area / union_area if union_area > 0 else 0.0
+
+
+def non_max_suppression(detections, iou_threshold=0.5):
+    """
+    detections: list of (x1, y1, x2, y2, score), already sorted by score descending.
+    Keeps the highest-scoring box in each overlapping cluster, discards the rest.
+    """
+    kept = []
+    remaining = list(detections)
+
+    while remaining:
+        best = remaining.pop(0)
+        kept.append(best)
+        remaining = [
+            d for d in remaining
+            if compute_iou(best[:4], d[:4]) < iou_threshold
+        ]
+
+    return kept
+
+
 def decode_predictions(heatmap_logits, box_preds, confidence_threshold=0.3, max_detections=50):
     """
     Converts raw model output into a list of (x1, y1, x2, y2, score) boxes
@@ -56,6 +93,7 @@ def decode_predictions(heatmap_logits, box_preds, confidence_threshold=0.3, max_
 
     # Keep only the top-N by confidence, in case of many low-quality detections early in training
     detections.sort(key=lambda d: d[4], reverse=True)
+    detections = non_max_suppression(detections, iou_threshold=0.5)
     return detections[:max_detections]
 
 

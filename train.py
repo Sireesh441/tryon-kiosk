@@ -4,16 +4,17 @@ train.py
 Wires together CocoPersonDataset + PersonDetector + detector_loss into
 an actual training loop.
 
-This is meant to be run in two modes:
-  1. CPU smoke run: trains on a SMALL subset (SUBSET_SIZE) for a few
-     epochs, just to confirm the loss goes down and nothing is broken.
-     Slow but cheap -- do this before spending RunPod GPU credits.
-  2. Full run (current default): SUBSET_SIZE=None trains on the entire
-     person-filtered dataset (2,693 val2017 images) for NUM_EPOCHS=50 on
-     the GPU. 50 is a starting point for a small (~450K param) detector
-     on a few thousand images -- CenterNet-style anchor-free detectors
-     this size typically need tens of epochs to show real convergence;
-     revisit upward if loss is still dropping steadily at epoch 50.
+This is meant to be run in three modes, toggled via SPLIT/SUBSET_SIZE/
+NUM_EPOCHS below:
+  1. CPU smoke run: SPLIT="val2017", small SUBSET_SIZE, few epochs --
+     confirms the loss goes down and nothing is broken. Slow but cheap --
+     do this before spending RunPod GPU credits.
+  2. val2017 full run: SPLIT="val2017", SUBSET_SIZE=None -- trains on the
+     full 2,693-image person-filtered val set. Good for validating the
+     pipeline end-to-end on GPU before committing to the much larger
+     train2017 run.
+  3. train2017 full run (current default): SPLIT="train2017",
+     SUBSET_SIZE=None -- the real, full-scale training run.
 
 Usage:
     py train.py
@@ -29,19 +30,20 @@ from coco_person_dataset import CocoPersonDataset
 from detector_model import PersonDetector, detector_loss
 
 # --- Config ---------------------------------------------------------------
+SPLIT = "train2017"     # "val2017" or "train2017" -- which CocoPersonDataset split to train on
 SUBSET_SIZE = None      # None = full dataset; set to an int for a fast CPU smoke run
 BATCH_SIZE = 4
-NUM_EPOCHS = 50
+NUM_EPOCHS = 15         # see the printed time estimate before committing to a full train2017 run
 LEARNING_RATE = 1e-3
-CHECKPOINT_EVERY = 10   # also save a checkpoint every N epochs, not just at the end
+CHECKPOINT_EVERY = 1    # save a checkpoint every N epochs, not just at the end
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def main():
     print(f"Using device: {DEVICE}")
 
-    print("Loading dataset...")
-    full_dataset = CocoPersonDataset()
+    print(f"Loading dataset (split={SPLIT})...")
+    full_dataset = CocoPersonDataset(split=SPLIT)
     if SUBSET_SIZE is None:
         dataset = full_dataset
     else:
@@ -96,14 +98,23 @@ def main():
         avg_heatmap = heatmap_loss_sum / num_batches
         avg_box = box_loss_sum / num_batches
         epoch_time = time.time() - epoch_start
+        percent_complete = 100 * epoch / NUM_EPOCHS
 
         print(
-            f"Epoch {epoch}/{NUM_EPOCHS} | "
+            f"Epoch {epoch}/{NUM_EPOCHS} ({percent_complete:.1f}% complete) | "
             f"total_loss: {avg_total:.4f} | "
             f"heatmap_loss: {avg_heatmap:.4f} | "
             f"box_loss: {avg_box:.4f} | "
             f"time: {epoch_time:.1f}s"
         )
+
+        if epoch == 1:
+            estimated_total_seconds = epoch_time * NUM_EPOCHS
+            print(
+                f"  -> Based on epoch 1's time, estimated total training time: "
+                f"{estimated_total_seconds / 3600:.1f} hours "
+                f"({estimated_total_seconds / 60:.0f} minutes) for all {NUM_EPOCHS} epochs."
+            )
 
         if epoch % CHECKPOINT_EVERY == 0:
             save_checkpoint(epoch)

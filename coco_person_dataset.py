@@ -1,7 +1,7 @@
 """
 coco_person_dataset.py
 
-PyTorch Dataset for the person-only COCO val2017 subset.
+PyTorch Dataset for a person-only COCO subset (val2017 or train2017).
 
 Loads an image + its person bounding boxes, resizes both to a fixed
 size, and builds the training targets our anchor-free detector head
@@ -10,7 +10,7 @@ expects:
   - a box-size map: distance from each "inside-a-box" grid cell to the
     box's left/top/right/bottom edges
 
-Usage (quick smoke test):
+Usage (quick smoke test, defaults to val2017):
     py coco_person_dataset.py
 """
 
@@ -24,8 +24,6 @@ from torchvision.transforms.functional import resize
 
 # --- Config ---------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent
-IMAGES_DIR = PROJECT_ROOT / "data" / "coco" / "val2017"
-ANNOTATIONS_PATH = PROJECT_ROOT / "data" / "coco" / "annotations" / "instances_val2017_person.json"
 
 INPUT_SIZE = 512          # resize every image to INPUT_SIZE x INPUT_SIZE
 STRIDE = 8                # how much the backbone downsamples (grid = INPUT_SIZE / STRIDE)
@@ -33,7 +31,19 @@ GRID_SIZE = INPUT_SIZE // STRIDE  # 64x64 grid of prediction cells
 
 
 class CocoPersonDataset(Dataset):
-    def __init__(self, images_dir=IMAGES_DIR, annotations_path=ANNOTATIONS_PATH):
+    def __init__(self, split="val2017", images_dir=None, annotations_path=None):
+        """
+        split: "val2017" or "train2017" -- picks the default images_dir /
+        annotations_path below. Pass images_dir/annotations_path explicitly
+        to override either one individually.
+        """
+        if images_dir is None:
+            images_dir = PROJECT_ROOT / "data" / "coco" / split
+        if annotations_path is None:
+            annotations_path = (
+                PROJECT_ROOT / "data" / "coco" / "annotations" / f"instances_{split}_person.json"
+            )
+
         self.images_dir = Path(images_dir)
 
         with open(annotations_path, "r") as f:

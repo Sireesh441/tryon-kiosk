@@ -7,33 +7,44 @@ annotations, and writes:
   2. A plain text list of image filenames that contain at least one person
 
 Usage:
-    py filter_person_annotations.py
+    py filter_person_annotations.py                # val2017 (default)
+    py filter_person_annotations.py --split train2017
 
-Expects the COCO val2017 layout:
-    data/coco/annotations/instances_val2017.json
-    data/coco/val2017/*.jpg
+Expects the COCO layout:
+    data/coco/annotations/instances_{split}.json
+    data/coco/{split}/*.jpg
 """
 
+import argparse
 import json
 from pathlib import Path
 
 # --- Config ---------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent
-ANNOTATIONS_PATH = PROJECT_ROOT / "data" / "coco" / "annotations" / "instances_val2017.json"
-OUTPUT_ANNOTATIONS_PATH = PROJECT_ROOT / "data" / "coco" / "annotations" / "instances_val2017_person.json"
-OUTPUT_IMAGE_LIST_PATH = PROJECT_ROOT / "data" / "coco" / "annotations" / "person_image_filenames.txt"
 PERSON_CATEGORY_NAME = "person"
 
 
 def main():
-    if not ANNOTATIONS_PATH.exists():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--split", default="val2017", choices=["val2017", "train2017"],
+        help="Which COCO split's annotations to filter (default: val2017)",
+    )
+    args = parser.parse_args()
+
+    annotations_dir = PROJECT_ROOT / "data" / "coco" / "annotations"
+    annotations_path = annotations_dir / f"instances_{args.split}.json"
+    output_annotations_path = annotations_dir / f"instances_{args.split}_person.json"
+    output_image_list_path = annotations_dir / f"{args.split}_person_image_filenames.txt"
+
+    if not annotations_path.exists():
         raise FileNotFoundError(
-            f"Could not find {ANNOTATIONS_PATH}. "
-            "Make sure val2017 annotations are extracted to data/coco/annotations/"
+            f"Could not find {annotations_path}. "
+            f"Make sure {args.split} annotations are extracted to data/coco/annotations/"
         )
 
-    print(f"Loading {ANNOTATIONS_PATH.name} ...")
-    with open(ANNOTATIONS_PATH, "r") as f:
+    print(f"Loading {annotations_path.name} ...")
+    with open(annotations_path, "r") as f:
         coco = json.load(f)
 
     # Find the person category ID (should be 1 in COCO, but don't hardcode it)
@@ -64,16 +75,16 @@ def main():
         "categories": [person_category],
     }
 
-    OUTPUT_ANNOTATIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(OUTPUT_ANNOTATIONS_PATH, "w") as f:
+    output_annotations_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_annotations_path, "w") as f:
         json.dump(filtered_coco, f)
-    print(f"Wrote filtered annotations to {OUTPUT_ANNOTATIONS_PATH}")
+    print(f"Wrote filtered annotations to {output_annotations_path}")
 
     # Write plain filename list for quick reference / sanity checks
     filenames = sorted(img["file_name"] for img in person_images)
-    with open(OUTPUT_IMAGE_LIST_PATH, "w") as f:
+    with open(output_image_list_path, "w") as f:
         f.write("\n".join(filenames))
-    print(f"Wrote {len(filenames)} filenames to {OUTPUT_IMAGE_LIST_PATH}")
+    print(f"Wrote {len(filenames)} filenames to {output_image_list_path}")
 
     print("\nDone. Sanity check a few entries:")
     for img in person_images[:3]:
